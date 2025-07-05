@@ -376,7 +376,8 @@ void *ndi_source_thread(void *data)
 	int64_t timestamp_audio = 0;
 	int64_t timestamp_video = 0;
 
-	bool source_enabled = obs_source_enabled(s->obs_source);
+	bool no_connections;
+	bool source_enabled;
 
 	//
 	// Main NDI receiver loop: BEGIN
@@ -554,10 +555,19 @@ void *ndi_source_thread(void *data)
 		// check if there are any connections.
 		// If not then micro-pause and restart the loop.
 		//
-		bool no_connections = ndiLib->recv_get_no_connections(ndi_receiver) == 0;
-		bool current_enabled = obs_source_enabled(s->obs_source);
-		if (current_enabled != source_enabled) {
-			source_enabled = current_enabled;
+		no_connections = ndiLib->recv_get_no_connections(ndi_receiver) == 0;
+		if (s->config.auto_deactivate) {
+			// obs_source_enabled is a lightweight null check and boolean field dereference
+			source_enabled = obs_source_enabled(s->obs_source);
+			if (no_connections) {
+				if (source_enabled) {
+					obs_source_set_enabled(s->obs_source, false);
+				}
+			} else {
+				if (!source_enabled) {
+					obs_source_set_enabled(s->obs_source, true);
+				}
+			}
 		}
 		if (no_connections) {
 #if 0
@@ -565,18 +575,9 @@ void *ndi_source_thread(void *data)
 				"'%s' ndi_source_thread: No connection; sleep and restart loop",
 				obs_source_name);
 #endif
-			if (s->config.auto_deactivate && current_enabled) {
-				obs_source_set_enabled(s->obs_source, false);
-				source_enabled = false;
-			}
 			// This will also slow down the shutdown of OBS when no NDI feed is received.
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 			continue;
-		} else {
-			if (s->config.auto_deactivate && !current_enabled) {
-				obs_source_set_enabled(s->obs_source, true);
-				source_enabled = true;
-			}
 		}
 
 		//
